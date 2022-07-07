@@ -1,14 +1,27 @@
 #include "net.h"
 #include "canvas.h"
+#include "args.h"
 
 #include <stdlib.h>
 #include <errno.h>
-#include <stdio.h> //sprintf
+#include <stdio.h>
+
 
 unsigned int px_width = 1024;
 unsigned int px_height = 1024;
 unsigned int px_pixelcount = 0;
 unsigned int px_clientcount = 0;
+
+#define ESC 256
+#define F11 300
+#define F12 301
+
+const char *argp_program_version = "pixelnuke 1.0.0";
+const char *argp_program_bug_address = "https://github.com/defnull/pixelflut/";
+static char doc[] = "Server written in C, based on libevent2, OpenGL, GLFW and pthreads.\n \
+					It won't get any faster than this.\n \
+					Perfect for fast networks and large groups.";
+static char args_doc[] = "[PORT] [WIDTH] [HEIGHT] [FULLSCREEN]";
 
 // User sessions
 typedef struct PxSession {
@@ -141,35 +154,32 @@ void px_on_read(NetClient *client, char *line) {
 
 	} else if (fast_str_startswith("HELP", line)) {
 
-		net_send(client,
-				"\
-PX x y: Get color at position (x,y)\n\
-PX x y rrggbb(aa): Draw a pixel (with optional alpha channel)\n\
-SIZE: Get canvas size\n\
-STATS: Return statistics");
+		net_send(client,"\
+				PX x y: Get color at position (x,y)\n \
+				PX x y rrggbb(aa): Draw a pixel (with optional alpha channel)\n \
+				SIZE: Get canvas size\n \
+				STATS: Return statistics"
+		);
 
 	} else {
-
 		net_err(client, "Unknown command");
-
 	}
 }
 
 void px_on_key(int key, int scancode, int mods) {
-
 	printf("Key pressed: key:%d scancode:%d mods:%d\n", key, scancode, mods);
 
-	if (key == 300) { // F11
+	if (key == F11) {
 		int display = canvas_get_display();
 		if (display < 0)
 			canvas_fullscreen(0);
 		else
 			canvas_fullscreen(-1);
-	} else if (key == 301) { // F12
+	} else if (key == F12) {
 		canvas_fullscreen(canvas_get_display() + 1);
-	} else if (key == 67) { // c
+	} else if (key == 'c') {
 		canvas_fill(0x00000088);
-	} else if (key == 81 || key == 256) { // q or ESC
+	} else if (key == 'q' || key == ESC) {
 		canvas_close();
 	}
 }
@@ -183,13 +193,38 @@ void px_on_window_close() {
 	net_stop();
 }
 
+
 int main(int argc, char **argv) {
 	canvas_setcb_key(&px_on_key);
 	canvas_setcb_resize(&px_on_resize);
 
 	canvas_start(1024, &px_on_window_close);
 
-	net_start(1337, &px_on_connect, &px_on_read, &px_on_close);
-	return 0;
-}
+	struct arguments arguments = {
+		.port = 1337,
+		.width = 1024,
+		.height = 1024,
+		.fps = 60,
+		.fullscreen = true,
+	};
 
+	static struct argp_option options[] = {
+			{"port", 'p', "PORT", 0, "Port to listen on (default: 1337)"},
+			{"width", 'w', "WIDTH", 0, "Width of the canvas (default: 1024)"},
+			{"height", 'h', "HEIGHT", 0, "Height of the canvas (default: 1024)"},
+			{"fps", 'F', "FPS", 0, "Frames per second (default: 60)"},
+			{"fullscreen", 'f', "true/false", 0, "Start in fullscreen mode"},
+			{0}
+	};
+
+	static struct argp argp = {options, parse_opt, args_doc, doc};
+	error_t error = argp_parse(&argp, argc, argv, 0, 0, &arguments);
+	if (error) {
+		fprintf(stderr, "Error parsing arguments\n");
+		return EINVAL;
+	}
+
+	net_start(arguments.port, &px_on_connect, &px_on_read, &px_on_close);
+
+	return EXIT_SUCCESS;
+}
